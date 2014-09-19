@@ -1,11 +1,13 @@
-#iWork '13 File Format
+#iWork ‘13 File Format
 
 ## <a name="overview"/>Overview
-The iWork '13 format is a [bundle](https://developer.apple.com/library/mac/documentation/corefoundation/conceptual/cfbundles/DocumentPackages/DocumentPackages.html)-based format built on top of several open source projects. This document describes the physical layout of files contained in these bundles and the algorithms involved, but does not attempt to describe the nature of the represented object graph.
+The iWork ‘13 format is a [bundle](https://developer.apple.com/library/mac/documentation/corefoundation/conceptual/cfbundles/DocumentPackages/DocumentPackages.html)-based format built on top of several open source projects. This document describes the physical layout of files contained in these bundles and the algorithms involved, but does not attempt to describe the nature of the represented object graph.
 
 ## <a name="bundle"/>Bundle
 
-The organization of an iWork document bundle is fairly straightforward. Media such as images and videos are stored in the `Data` subdirectory, serialized objects are stored in [Index.zip](#index-zip), some light metadata is stored in the `Metadata` subdirectory, and a few preview images are stored in the top level of the bundle.
+The organization of an iWork document bundle is fairly straightforward. 
+
+Media such as images and videos are stored in the `Data/` subdirectory, serialized objects are stored in [`Index.zip`](#index-zip), some light metadata is stored in the `Metadata/` subdirectory, and a few preview images are stored in the top level of the bundle.
 
 	Photo Essay.key/
 		Data/
@@ -23,8 +25,8 @@ The organization of an iWork document bundle is fairly straightforward. Media su
 		preview-web.jpg
 		preview.jpg
 
-## <a name="index-zip" />Index.zip
-A document's objects are organized into groups called Components. Each Component is serialized into the [IWA](#iwa) format and stored in Index.zip.
+## <a name="index-zip" />`Index.zip`
+A document's objects are organized into groups called Components. Each Component is serialized into the [IWA](#iwa) format and stored in `Index.zip`.
 
 	Index/
 		AnnotationAuthorStorage.iwa
@@ -36,23 +38,27 @@ A document's objects are organized into groups called Components. Each Component
 		MasterSlide-11.iwa
 		...
 
-Curiously, the zip implementation iWork uses for this file is extremely limited. It does not support any form of compression or extensions like Zip64. Simply expanding Index.zip and then recreating it with a standard zip utility will result in a document that iWork refuses to open.
+Curiously, the iWork’s zip implementation for this file is extremely limited. It does not support any form of compression or extensions (like Zip64). Simply expanding `Index.zip` and then rezipping it with a standard zip utility results in a document that iWork refuses to open.
 
-The iWork '13 applications contain a separate, more complete zip implementation used for reading and writing iWork '09 documents (which are bundles that have been zipped in their entirety), so I believe the choice to forgo compression for Index.zip is intentional.
+The iWork ‘13 applications contain a separate, more complete zip implementation, which is used for reading and writing iWork ‘09 documents (which are bundles that have been zipped in their entirety), so I believe the choice to forgo compression for `Index.zip` is intentional.
 
-One possibility is that Index.zip is used to prevent the syncronization issues that would occur if reading and writing a document involved accessing many small files. Saving a document might involve writing out several Components, so instead of coordinating writes to the various individual .iwa files, only the Index.zip must be locked. Since the .iwa files are inherently compressed (see [Snappy Compression](#snappy-compression)), the zip implementation used for Index.zip could be designed to be minimial and efficient.
+One possibility is that `Index.zip` is used to prevent the syncronization issues that would occur if reading and writing a document involved accessing many small files. Saving a document might involve writing out several Components, so instead of coordinating writes to the various individual .iwa files, only the `Index.zip` must be locked. Since the `.iwa` files are inherently compressed (see [Snappy Compression](#snappy-compression)), the zip implementation used for `Index.zip` could be designed to be minimial and efficient.
 
 ## <a name="iwa"/>IWA
 
-Components are serialized into .iwa (iWork Archive) files, a custom format consisting of a [Protobuf](#protobuf) stream wrapped in a [Snappy](#snappy-compression) stream.
+Components are serialized into `.iwa` (iWork Archive) files, a custom format consisting of a [Protobuf](#protobuf) stream wrapped in a [Snappy](#snappy-compression) stream.
 
 ### <a name="snappy-compression"/>Snappy Compression
 [Snappy](https://code.google.com/p/snappy/) is a compression format created by Google aimed at providing decent compression ratios at high speeds. IWA files are stored in Snappy's [framing format](https://code.google.com/p/snappy/source/browse/trunk/framing_format.txt), though they do not adhere rigorously to the spec. In particular, they do not include the required Stream Identifier chunk, and compressed chunks do not include a CRC-32C checksum.
 
-The stream is composed of contiguous chunks prefixed by a 4 byte header. The first byte indicates the chunk type, which in practice is always 0 for iWork, indicating a Snappy compressed chunk. The next three bytes are interpreted as a 24-bit little-endian integer indicating the length of the chunk. The 4 byte header is not included in the chunk length.
+The stream is composed of contiguous chunks prefixed by a 4 byte header. The first byte indicates the chunk type, which in practice is always `0` for iWork (indicating a Snappy compressed chunk). The next three bytes are interpreted as a 24-bit little-endian integer, indicating the length of the chunk. 
+
+The 4 byte header is not included in the chunk length.
 
 ### <a name="protobuf"/>Protobuf
-The uncompresed IWA contains the Component's objects, serialized consecutively in a [Protobuf](https://code.google.com/p/protobuf/) stream. Each object begins with a [varint](https://developers.google.com/protocol-buffers/docs/encoding#varints) representing the length of the [ArchiveInfo](#archiveinfo) message, followed by the `ArchiveInfo` message itself. The `ArchiveInfo` includes a variable number of [MessageInfo](#messageinfo) messages describing the encoded [Payloads](#payload) that follow, though in practice iWork files seem to only have one payload message per `ArchiveInfo`.
+The uncompresed IWA contains the Component's objects, serialized consecutively in a [Protobuf](https://code.google.com/p/protobuf/) stream. 
+
+Each object begins with a [varint](https://developers.google.com/protocol-buffers/docs/encoding#varints) representing the length of the [ArchiveInfo](#archiveinfo) message, followed by the `ArchiveInfo` message itself. The `ArchiveInfo` includes a variable number of [MessageInfo](#messageinfo) messages describing the encoded [Payloads](#payload) that follow, though in practice iWork files seem to only have one payload message per `ArchiveInfo`.
 
 	Object 0	varint archiveInfoLength
 				ArchiveInfo archiveInfo
@@ -91,14 +97,16 @@ The `MessageInfo` message describes the encoded payload that follows the `Archiv
 	}
 
 ### <a name="payload"/>Payload
-The format of the payload is determined by the `type` field of the associated `MessageInfo` message. The iWork applications manually map these integer values to their respective Protobuf message types, and the mappings vary slightly between Keynote, Pages and Numbers. This information can be recovered by inspecting the [TSPRegistry](#tspregistry) class at runtime.
+The format of the payload is determined by the `type` field of the associated `MessageInfo` message. The iWork applications manually map these integer values to their respective Protobuf message types, and the mappings vary slightly between Keynote, Pages, and Numbers. This information can be recovered by inspecting the [TSPRegistry](#tspregistry) class at runtime.
 
 Because Protobuf is not a self-describing format, applications attempting to understand the payloads must know a great deal about the data types and hierarchy of the objects serialized by iWork. Fortunately, all of this information can be recovered from the iWork binaries using [proto-dump](https://github.com/obriensp/proto-dump).
 
 A full dump of the Protobuf messages can be found [here](../iWorkFileInspector/iWorkFileInspector/Messages/Proto/).
 
 ### <a name="tspregistry" />TSPRegistry
-The mapping between an object's `MessageInfo.type` and its respective Protobuf message type must by extracted from the iWork applications at runtime. Attaching to Keynote via a debugger and inspecting `[TSPRegistry sharedRegistry]` shows:
+The mapping between an object's `MessageInfo.type` and its respective Protobuf message type must by extracted from the iWork applications at runtime. 
+
+Attaching to Keynote via a debugger and inspecting `[TSPRegistry sharedRegistry]` shows:
 
 	<TSPRegistry 0x102daf560 
 	 _messageTypeToPrototypeMap = {
@@ -111,4 +119,6 @@ The mapping between an object's `MessageInfo.type` and its respective Protobuf m
 A full list of the type mappings can be found [here](../iWorkFileInspector/iWorkFileInspector/Persistence/MessageTypes/).
 
 ## <a name="encryption"/>Encryption
-If the document is locked with a password, nearly all files in the bundle are encrypted using [AES128](http://en.wikipedia.org/wiki/Advanced_Encryption_Standard) encryption with [PKCS7](http://en.wikipedia.org/wiki/Padding_\(cryptography\)#PKCS7) padding. For a full description of the encryption format, see [iWork Encrypted Stream](iWork Encrypted Stream.md).
+If the document is locked with a password, nearly all files in the bundle are encrypted using [AES128](http://en.wikipedia.org/wiki/Advanced_Encryption_Standard) encryption with [PKCS7](http://en.wikipedia.org/wiki/Padding_\(cryptography\)#PKCS7) padding. 
+
+For a full description of the encryption format, see [iWork Encrypted Stream](iWork Encrypted Stream.md).
